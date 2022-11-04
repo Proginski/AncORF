@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# For a given CDS, this script looks for homologs among the CDS (BLASTp) and intergenic regions (i.e. IGR) (tBLASTn) of the neighbor species.
+# It generates :
+# - a FASTA file with the CDS (nucl) seq and the homologs (CDS or IGR)
+# - a txt file with the names (species) and types (CDS or IGR) present in the FASTA file
+# - a nwk file with evolutionnary relationships bewteen the selected species.
+
+
 while [ $# -gt 0 ]; do
 
    if [[ $1 == *"--"* ]]; then
@@ -11,23 +18,50 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+trap "exit 1" TERM
+export TOP_PID=$$
+
 cd $main_dir
 
 echo $query
 
-# Append the neighbor short name to the toali file
-#awk -v focal=$focal_species '$0 == focal {print ">"substr($0,1,5)FNR}' $species_list | head -c 10 > ${process_dir}/$out_seq
-awk -F"," -v focal=$focal_species '$1 == focal {print ">"$2}' ${process_dir}/$phylip_names > ${process_dir}/$out_seq
+
+add_to_fasta () {
+
+        if [ -z $header ]; then
+                echo "*** NO HEADER for the sequence : $seq ***"
+                kill -s TERM $TOP_PID
+        else 
+                if [ -z $seq ]; then
+                        echo "*** EMPTY SEQUENCE for the header $header . This EXACT header might be absent of the file you are parsing ***"
+                        kill -s TERM $TOP_PID
+                else
+                        echo $header >> ${process_dir}/${out_seq}
+                        echo $seq >> ${process_dir}/${out_seq}
+                fi
+        fi
+
+        header=""
+        seq=""
+}
+
+
+
+# Append the focal (species of interest) short name to the output FASTA file and to the output txt file
+header=$(awk -F"," -v focal=$focal_species '$1 == focal {print ">"$2}' ${process_dir}/$phylip_names)
 awk -F"," -v focal=$focal_species '$1 == focal {print $2" CDS"}' ${process_dir}/$phylip_names > ${process_dir}/$names_n_types
 
-# Then, first the focal (query) nucleotide sequence
-grep $query -A1 GENOMES/${focal_species}_CDS.nfasta | grep -v \> >> ${process_dir}/${out_seq}
+# Add the focal (query) nucleotide sequence to the FASTA file
+# First line : make sur to deal with a linearized (long format) input FASTA
+# Second line : get the sequence without the header
+seq=$(cat GENOMES/${focal_species}_CDS.nfasta | awk '/^>/ {if(N>0) printf("\n"); printf("%s\n",$0);++N;next;} { printf("%s",$0);} END {printf("\n");}' \
+| grep -x ">${query}" -A1  | grep -v \>)
 
-# Add the focal species in the names for the phylogenetic tree
-#awk -v focal=$focal_species '$0 == focal {print ">"substr($0,1,5)FNR}' $species_list | head -c 10 > ${process_dir}/${query}_names.txt
+# Safely append header and seq to the output FASTA
+add_to_fasta
 
-# Then the appropriate neighbor sequences
-cat $neighbors | while read neighbor; do
+# Then search for homologs in the neighbor sequences for each neighbor species.
+cat $species_list | grep -v -x $focal_species | while read neighbor; do
 
 	echo $neighbor
 
@@ -43,24 +77,35 @@ cat $neighbors | while read neighbor; do
 
 		echo $CDS_sbjct
 
-                # Append the neighbor to the names for the phylogenetic tree
-                #awk -v neighbor=$neighbor '$0 == neighbor {print ">"substr($0,1,5)FNR}' $species_list | head -c 10 >> ${process_dir}/${query}_names.txt
-
-                # Append the neighbor short name to the toali file
-                #awk -v neighbor=$neighbor '$0 == neighbor {print ">"substr($0,1,5)FNR}' $species_list | head -c 10 >> ${process_dir}/$out_seq
-                awk -F"," -v neighbor=$neighbor '$1 == neighbor {print ">"$2}' ${process_dir}/$phylip_names >> ${process_dir}/$out_seq
+		# Append the neighbor short name to the output FASTA file and to the output txt file
+                header=$(awk -F"," -v neighbor=$neighbor '$1 == neighbor {print ">"$2}' ${process_dir}/$phylip_names)
                 awk -F"," -v neighbor=$neighbor '$1 == neighbor {print $2" CDS"}' ${process_dir}/$phylip_names >> ${process_dir}/$names_n_types
                 
 		# Elongate the range
-                # First if not already done, get an FASTA with elongated CDS
-		if [ ! -s ${process_dir}/${neighbor}_CDS_elongated.nfasta ]; then
-			echo "${process_dir}/${neighbor}_CDS_elongated.nfasta does not exists or is empty. Generating it with ORFget -elongate 100 ..."
-			python /SCRIPTS/ORFget_v2.py -fna GENOMES/${neighbor}.fna -gff GENOMES/${neighbor}.gff -o ${process_dir}/${neighbor}_CDS -type nfasta -features_include CDS -elongate 100
+                # First if not already done, get a FASTA with elongated CDS for the neighbor (better futur alignment).
+                elongated_fna=${process_dir}/${neighbor}_${CDS_sbjct}_elongated.nfasta
+                
+		if [ ! -s $elongated_fna ]; then
+			echo "$elongated_fna does not exists or is empty. Generating it with ORFget -elongate 100 ..."
+			
+			# Define a subset of the neighbor GFF file that only contain (the) chromosome(s) mentionning ${CDS_sbjct}
+			grep ${CDS_sbjct} GENOMES/${neighbor}.gff | awk -F"\t" '{print $1}' | sort | uniq > ${process_dir}/${neighbor}_${CDS_sbjct}_chrs.txt
+			awk 'BEGIN{FS=OFS="\t"} {if(FNR == NR){data[$0] = 1} else{ if($1 in data) {print $0}}}' ${process_dir}/${neighbor}_${CDS_sbjct}_chrs.txt GENOMES/${neighbor}.gff > ${process_dir}/${neighbor}_${CDS_sbjct}.gff
+			
+			python /SCRIPTS/ORFget_v2.py -fna GENOMES/${neighbor}.fna -gff ${process_dir}/${neighbor}_${CDS_sbjct}.gff -o ${process_dir}/${neighbor}_${CDS_sbjct} -type nfasta -features_include CDS -elongate 100
+			
+			# make sur to deal with a linearized (long format) input FASTA
+			cat $elongated_fna | awk '/^>/ {if(N>0) printf("\n"); printf("%s\n",$0);++N;next;} { printf("%s",$0);} END {printf("\n");}' > ${elongated_fna}_tmp
+			mv ${elongated_fna}_tmp $elongated_fna
 		fi
 
-		# Only add the sequence not the correpsonding header
-		grep $CDS_sbjct -A1 ${process_dir}/${neighbor}_CDS_elongated.nfasta | grep -v ">" >> ${process_dir}/$out_seq
+		# Only add the sequence not the correpsonding header.
+		# As /SCRIPTS/ORFget_v2.py add a ".._mRNA" suffix that may not be present in the blastp subject name, look also for ">${CDS_sbjct}_.*mRNA"
+		seq=$(grep -x -E ">${CDS_sbjct}|>${CDS_sbjct}_.*mRNA" $elongated_fna -A1  | grep -v ">")
 
+		# Safely append header and seq to the output FASTA
+		add_to_fasta
+		
 
 	else
 		echo "NO CDS match, looking for IGR match..."
@@ -78,16 +123,12 @@ cat $neighbors | while read neighbor; do
 
         	        echo $IGR_sbjct
 
-                         # Appnd the neighbor to the names for the phylogenetic tree
-                        #awk -v neighbor=$neighbor '$0 == neighbor {print ">"substr($0,1,5)FNR}' $species_list | head -c 10 >> ${process_dir}/${query}_names.txt
-
-                        # Append the neighbor short name to the toali file
-                        #awk -v neighbor=$neighbor '$0 == neighbor {print ">"substr($0,1,5)FNR}' $species_list | head -c 10 >> ${process_dir}/$out_seq
-                        awk -F"," -v neighbor=$neighbor '$1 == neighbor {print ">"$2}' ${process_dir}/$phylip_names >> ${process_dir}/$out_seq
+			# Append the neighbor short name to the output FASTA file and to the output txt file
+                        header=$(awk -F"," -v neighbor=$neighbor '$1 == neighbor {print ">"$2}' ${process_dir}/$phylip_names)
                         awk -F"," -v neighbor=$neighbor '$1 == neighbor {print $2" IGR"}' ${process_dir}/$phylip_names >> ${process_dir}/$names_n_types
 			
 			# Remove comment lines
-			# In the second field of the tblastn output (matching IGR name), replace the pattern "nonalphanumericcharacter digigits - digits " by "tabulation digits tabulation digits"  so we can acces the start and the stop of the IGR
+			# In the second field of the tblastn output (matching IGR name), replace the pattern "nonalphanumericcharacter digits - digits " by "tabulation digits tabulation digits"  so we can acces the start and the stop of the IGR
 			# Elongate the hit as proposed by Papadopoulos and print the result as a one-line GFF.
 			elongated_hit=$(awk 'BEGIN{FS=OFS="\t"} $1 !~ /#/' <(echo "$IGR_line") \
 			| awk 'BEGIN{FS=OFS="\t"} {$2=gensub( /(.*)[^a-zA-Z0-9]([0-9]+)-([0-9]+)/ , "\\1\t\\2\t\\3" , 1 , $2)}1' \
@@ -115,12 +156,16 @@ cat $neighbors | while read neighbor; do
 			# Get the corresponding sequence with ORFget and the option elongate
 
 			# First if not already done, get a file with the chromosome lenghts
-			if [ ! -s GENOMES/${neighbor}.genome ]; then faSize GENOMES/${neighbor}.fna -tab -detailed > GENOMES/${neighbor}.genome ; fi
+			if [ ! -s GENOMES/${neighbor}.genome ]; then /packages/faSize GENOMES/${neighbor}.fna -tab -detailed > GENOMES/${neighbor}.genome ; fi
 
 			# Elongate the genomic range
 			bedtools slop -i <(echo "$elongated_hit") -g GENOMES/${neighbor}.genome -b 100 > ${process_dir}/${query}_${neighbor}_elongated.gff
 			# Get the corresponding sequence and append it to the alignment FASTA | wihtout the header (already written, see above)
-			bedtools getfasta -fi GENOMES/${neighbor}.fna -bed ${process_dir}/${query}_${neighbor}_elongated.gff -s | grep -v ">" >> ${process_dir}/$out_seq
+			# (bedtools getfasta does generates long lines FASTA files)
+			seq=$(bedtools getfasta -fi GENOMES/${neighbor}.fna -bed ${process_dir}/${query}_${neighbor}_elongated.gff -s | grep -v ">")
+			
+			# Safely append header and seq to the output FASTA
+			add_to_fasta
 
 
 	        else
