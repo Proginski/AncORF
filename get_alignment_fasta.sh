@@ -61,15 +61,15 @@ awk -F"," -v focal=$focal_species '$1 == focal {print $2" CDS"}' ${process_dir}/
 # Add the focal (query) nucleotide sequence to the FASTA file
 # First line : make sur to deal with a linearized (long format) input FASTA
 # Second line : get the sequence without the header
-seq=$(cat GENOMES/${focal_species}_CDS.fna | awk '/^>/ {if(N>0) printf("\n"); printf("%s\n",$0);++N;next;} { printf("%s",$0);} END {printf("\n");}' | \
-grep -x ">${query_uncorr}" -A1  | grep -v \>)
+seq=$(cat CDS/${focal_species}_CDS.fna | awk '/^>/ {if(N>0) printf("\n"); printf("%s\n",$0);++N;next;} { printf("%s",$0);} END {printf("\n");}' | \
+grep -x ">${query_uncorr}" -m1 -A1  | grep -v \>)
 
 # Safely append header and seq to the output FASTA
 add_to_fasta
 
 
 # Then search for homologs in the neighbor sequences for each neighbor species.
-cat $species_list | grep -v -x $focal_species | while read neighbor; do
+cat GENOMES/$species_list | grep -v -x $focal_species | while read neighbor; do
 
 	echo $neighbor
 
@@ -77,15 +77,12 @@ cat $species_list | grep -v -x $focal_species | while read neighbor; do
         # Only keep one row per query ($1) base on minimal evalue ($11)
         # Only keep this row if it satisfies the evalue ($11) threshold and print the subject sequence ($2) AND the match is on a POSITIVE strand (otherwise it cannot be a match with the tested neighbor's CDS) and with a qcov >= 0.5 
 	CDS_sbjct=$(awk -F"\t" -v query="${query_uncorr}" '
-				  BEGIN {                
-				    pattern = "^"query"_elongated_F[0-9]_[0-9]$"
-				    best_evalue=1000
-				  }                                            				            
-				  $1 ~ pattern && $11 < best_evalue && $11 <= 0.001 && ($8-$7)/$13 >= 0.5 { 
-				  	best_evalue=$11
-					best_subject=$2
-				  } 
-				  END {print best_subject}' BLASTP/${focal_species}_CDS_multielongated_blastp_${neighbor}_CDS_elongated.out )
+        
+                          BEGIN { pattern = "^"query"_elongated$" }                                                                                 
+        
+                          $2 ~ pattern {print $4 ; exit }
+        
+                          ' BLAST_OUT/${focal_species}_TRG_multielongated_blastp_${neighbor}_CDS_elongated_best_hits.txt )
 
 	# If there is a CDS match
 	if [ ! -z $CDS_sbjct ]
@@ -97,8 +94,8 @@ cat $species_list | grep -v -x $focal_species | while read neighbor; do
                 header=$(awk -F"," -v neighbor=$neighbor '$1 == neighbor {print ">"$2}' ${process_dir}/$phylip_names)
                 awk -F"," -v neighbor=$neighbor '$1 == neighbor {print $2" CDS"}' ${process_dir}/$phylip_names >> ${process_dir}/${query}_names_n_types.txt
                 
-		# Only add the sequence not the correpsonding header.
-		seq=$(grep -x -E ">${CDS_sbjct}" GENOMES/${neighbor}_CDS_elongated.fna -A1  | grep -v ">")
+		# Only add the sequence not the corresponding header.
+		seq=$(grep -x -E ">${CDS_sbjct}" CDS/${neighbor}_CDS_elongated.fna -m1 -A1  | grep -v ">")
 
 		# Safely append header and seq to the output FASTA
 		add_to_fasta
@@ -109,23 +106,35 @@ cat $species_list | grep -v -x $focal_species | while read neighbor; do
 	        # In the tBLASTn output of focal vs neighbor :
 	        # Only keep one row per query ($1) base on minimal evalue ($11)
         	# Only keep this row if it satisfies the evalue ($11) threshold and print the subject sequence ($2) and with a qcov >= 0.5 
-        	IGR_line=$(awk -F"\t" -v query="${query_uncorr}" '
-				  BEGIN {                
-				    pattern = "^"query"_elongated_F[0-9]_[0-9]$"
-				    best_evalue=1000
-				  }                                            				            
-				  $1 ~ pattern && $11 < best_evalue && $11 <= 0.001 && ($8-$7)/$13 >= 0.5 { 
-				  	best_evalue=$11
-				  	best_line=$0
-				  } 
-				  END {print best_line}' TBLASTN/${focal_species}_CDS_multielongated_tblastn_${neighbor}.out )
-			
-		IGR_sbjct=$(echo "${IGR_line}" | awk -F"\t" '{print $2}')
+        	IGR_sbjct=$(awk -F"\t" -v query="${query_uncorr}" '
+	
+			  BEGIN { pattern = "^"query"_elongated$" }                                            				            
+	
+			  $2 ~ pattern {print $4 ; exit }
+	
+			  ' BLAST_OUT/${focal_species}_TRG_multielongated_tblastn_${neighbor}_best_hits.txt  )
+
 
 	        # If there is an IGR match
 	        if [ ! -z $IGR_sbjct ]; then
 
         	        echo "IGR match found : $IGR_sbjct"
+        	        
+        	        sbjct=$(awk '{print gensub(/(.*)_([0-9]+)_([0-9]+)/,"\\1","g",$0)}' <(echo "${IGR_sbjct}") )
+        	        sstart=$(awk '{print gensub(/(.*)_([0-9]+)_([0-9]+)/,"\\2","g",$0)}' <(echo "${IGR_sbjct}") )
+        	        send=$(awk '{print gensub(/(.*)_([0-9]+)_([0-9]+)/,"\\3","g",$0)}' <(echo "${IGR_sbjct}") )
+        	        
+        	        echo "sbjct $sbjct sstart $sstart send $send"
+        	        
+        	        IGR_line=$(awk -F"\t" -v query="${query_uncorr}" -v sbjct="${sbjct}" -v sstart="${sstart}" -v send="${send}" ' 
+        	        		
+        	        		BEGIN { pattern = "^"query"_elongated_F[0-9]_[0-9]$" } 
+        	        		
+        	        		$1 ~ pattern && $2 ~ sbjct && $9 ~ sstart && $10 ~ send { print ; exit }
+        	        		
+        	        		' BLAST_OUT/${focal_species}_TRG_multielongated_tblastn_${neighbor}_processed.out)
+        	        		
+        	        echo "IGR_line : $IGR_line"
 
 			# Append the neighbor short name to the output FASTA file and to the output txt file
                         header=$(awk -F"," -v neighbor=$neighbor '$1 == neighbor {print ">"$2}' ${process_dir}/$phylip_names)
@@ -133,6 +142,8 @@ cat $species_list | grep -v -x $focal_species | while read neighbor; do
 			
 			# Elongate the hit as suggested by Papadopoulos and print the result as a one-line GFF.
 			elongated_hit=$( awk 'BEGIN{FS=OFS="\t"} {
+			
+				$2=gensub(/(.*)_([0-9]+)_([0-9]+)/,"\\1","g",$2)
 			
 				qlen=$13
 				qs=$7
@@ -148,12 +159,13 @@ cat $species_list | grep -v -x $focal_species | while read neighbor; do
 
 				if(ss < se){ print $2,"ELONGATED_HIT","non_coding", ss-q_ms_nucl , se+q_me_nucl ,".","+",".","X"}
 				else{ print $2,"ELONGATED_HIT","non_coding", se-q_me_nucl , ss+q_ms_nucl+1 ,".","-",".","X"}
+				
 			}' <(echo "$IGR_line")
 			)
 			
 			echo "elongated hit : ${elongated_hit}"
 			
-			# Ff the start coordinate of the elongated hit is inferior to one, or if its end coordinate is greter than the whole sequence,
+			# If the start coordinate of the elongated hit is inferior to one, or if its end coordinate is greter than the whole sequence,
 			# bedtools getfasta will be in error : so correct it. 
 			elongated_hit_corr=$( awk 'BEGIN{FS=OFS="\t"}{
 						
@@ -196,7 +208,7 @@ then
 	names=$(awk '{print $1}' ${process_dir}/${query}_names_n_types.txt)
 	echo "names = $names"
 	# Generate the phylogenetic tree with only the species that have a match
-	python /TEST_SCRIPTS/get_subtree.py -tree ${process_dir}/${tree} -names <(echo "$names") -out ${process_dir}/${query}.nwk
+	python /SCRIPTS/get_subtree.py -tree ${process_dir}/${tree} -names <(echo "$names") -out ${process_dir}/${query}.nwk
 else
 	echo "NOT enough (${seq_nb}) sequences"
 	mv ${process_dir}/${query}_toalign.fna ${process_dir}/fail

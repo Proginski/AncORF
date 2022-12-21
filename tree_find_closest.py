@@ -70,7 +70,7 @@ for node in tree.preorder_node_iter():
 tree.calc_node_root_distances(return_leaf_distances_only=False) 
 
 # For each taxon provided in names, get its most recent common ancestor with 
-# the focal species (= a node), and get its distance to the tree.
+# the focal species (= a node), and get its distance to the tree root.
 root_distance = { name:tree.mrca(taxon_labels=[focal_name, name]).root_distance for name in taxon_labels if name != focal_name }
 print(root_distance)
 max_value = max(root_distance.values())

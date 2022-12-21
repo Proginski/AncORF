@@ -147,7 +147,7 @@ else
 
 	faTrans ${pref_suf}.fna ${pref_suf}.faa.tmp
 	# Turn "Z" into "*", addd the frame information and linearize the FASTA
-	sed "s/Z/*/g" ${pref_suf}.faa | \
+	sed "s/Z/*/g" ${pref_suf}.faa.tmp | \
 	awk '/^>/ {printf("%s%s\n",(N>0?"\n":""),$0);N++;next;} {printf("%s",$0);} END {printf("\n");}' > ${pref_suf}.faa
 	
 	rm ${pref_suf}.faa.tmp
@@ -171,7 +171,7 @@ if [ ! -s ${outdir}/${name}_CDS.faa ]; then
 	faTrans ${outdir}/${name}_CDS.fna ${name}_CDS.faa.tmp
 	# Turn "Z" into "*" and linearize the FASTA
 	sed "s/Z/*/g" ${name}_CDS.faa.tmp | \
-	awk '/^>/ {printf("%s%s\n",(N>0?"\n":""),$0);N++;next;} {printf("%s",$0);} END {printf("\n");}' >> ${outdir}/${name}_CDS.faa
+	awk '/^>/ {printf("%s%s\n",(N>0?"\n":""),$0);N++;next;} {printf("%s",$0);} END {printf("\n");}' > ${outdir}/${name}_CDS.faa
 	rm ${name}_CDS.faa.tmp
 	
 fi
