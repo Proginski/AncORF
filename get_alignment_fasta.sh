@@ -21,6 +21,8 @@ export TOP_PID=$$
 
 
 cd $main_dir
+echo "PWD : $PWD"
+echo "main_dir : $main_dir"
 echo $query
 
 
@@ -39,7 +41,7 @@ add_to_fasta () {
         if [ -z $header ]; then
                 echo "*** NO HEADER for the sequence : $seq ***"
                 kill -s TERM $TOP_PID
-        else 
+        else
                 if [ -z $seq ]; then
                         echo "*** EMPTY SEQUENCE for the header $header . This EXACT header might be absent of the file you are parsing ***"
                         kill -s TERM $TOP_PID
