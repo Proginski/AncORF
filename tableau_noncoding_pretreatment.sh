@@ -90,5 +90,4 @@ $1 !~ /#/ {
         print $0
 
 }
-' ${BLAST_OUT}/Scer_NCBI_TRG_multielongated_tblastn_${subject_species}.out > ${BLAST_OUT}/Scer_NCBI_TRG_multielongated_tblastn_${subject_species}_processed.out
-#' ${BLAST_OUT}/Scer_NCBI_TRG_tblastn_${subject_species}.out > ${BLAST_OUT}/Scer_NCBI_TRG_tblastn_${subject_species}_processed.out
+' ${BLAST_OUT}/${query_species}_TRG_multielongated_tblastn_${subject_species}.out > ${BLAST_OUT}/${query_species}_TRG_multielongated_tblastn_${subject_species}_processed.out
